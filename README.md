@@ -67,5 +67,17 @@ Remove-Item .\data\expenses.db
 
 배포 workflow는 Docker Hub 로그인, 성공한 CI 커밋 SHA 이미지 pull, 기존 `personal-expense-tracker` 컨테이너 교체, `personal-expense-tracker-data` 볼륨 연결, `http://127.0.0.1:8000/health` 확인을 수행합니다. Runner의 8000 포트가 사용 중이면 배포가 실패하므로 먼저 해당 포트를 비워야 합니다. Runner 설치 폴더와 실행 로그는 `.gitignore`에서 제외합니다.
 
+### 자동 기능 테스트와 모니터링
+
+`tests/`는 운영 DB와 분리된 임시 SQLite DB에서 합성 거래 100건(수입 30건, 지출 70건)을 생성해 등록·조회·수정·삭제, 합계·잔액, 월별·카테고리별 통계, 잘못된 입력과 응답 시간을 검증합니다. `pytest` 실행 시 `reports/test-results.json`, `reports/test-report.html`, `reports/junit.xml`이 생성되며 CI Artifact로 보관됩니다. 이 결과 폴더는 Git에 커밋하지 않습니다.
+
+로컬 컨테이너 모니터링은 다음처럼 실행합니다. 기본 주기는 30초이며 오류가 나도 다음 주기에 계속 확인합니다.
+
+```powershell
+python scripts/monitor.py --url http://127.0.0.1:8000/health
+```
+
+한 번만 확인하려면 `--once`를 추가하고, 로그 위치를 바꾸려면 `--output reports/monitor.jsonl`을 사용합니다.
+
 SQLite는 단일 인스턴스·소규모 사용에 적합합니다. 클라우드에서는 컨테이너 재생성 시 파일이 사라질 수 있으므로 영속 디스크를 연결하거나 PostgreSQL 등 관리형 DB로 이전해야 합니다. `.env`, DB 파일, 인증정보를 저장소나 로그에 남기지 마세요. Chart.js CDN을 사용할 수 없는 폐쇄망에서는 라이브러리를 별도 정적 자산으로 제공해야 합니다.
 

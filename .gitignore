@@ -17,4 +17,5 @@ actions-runner/
 _work/
 runner.log
 runner-diagnostic-logs/
+reports/
 
