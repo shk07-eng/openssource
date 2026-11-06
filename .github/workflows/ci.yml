@@ -34,7 +34,9 @@ jobs:
           rm -f data/expenses.db
 
       - name: Run isolated functional and performance tests
-        run: pytest -q --junitxml=reports/junit.xml
+        run: |
+          mkdir -p reports
+          pytest -q --junitxml=reports/junit.xml
 
       - name: Upload test reports
         if: always()
