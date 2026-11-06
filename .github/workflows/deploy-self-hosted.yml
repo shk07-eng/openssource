@@ -8,6 +8,7 @@ on:
 env:
   IMAGE_NAME: personal-expense-tracker
   CONTAINER_NAME: personal-expense-tracker
+  DATA_VOLUME: personal-expense-tracker-data
   HOST_PORT: '8000'
 
 jobs:
@@ -29,35 +30,63 @@ jobs:
           IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.event.workflow_run.head_sha }}
         run: docker pull $env:IMAGE
 
-      - name: Replace running container
+      - name: Replace container with rollback protection
         shell: powershell
         env:
           IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.event.workflow_run.head_sha }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $existing = docker ps -aq --filter "name=^/${env:CONTAINER_NAME}$"
-          if ($existing) { docker rm -f $env:CONTAINER_NAME }
-          docker run -d --name $env:CONTAINER_NAME --restart unless-stopped `
-            -p "${env:HOST_PORT}:8000" `
-            -v "personal-expense-tracker-data:/app/data" `
-            $env:IMAGE
+          $oldImage = ''
+          $oldContainer = docker ps -aq --filter "name=^/${env:CONTAINER_NAME}$"
+          if ($oldContainer) {
+            $oldImage = (docker inspect --format '{{.Config.Image}}' $env:CONTAINER_NAME).Trim()
+            docker rm -f $env:CONTAINER_NAME
+          }
+          try {
+            docker run -d --name $env:CONTAINER_NAME --restart unless-stopped `
+              -p "${env:HOST_PORT}:8000" `
+              -v "${env:DATA_VOLUME}:/app/data" `
+              $env:IMAGE
+          } catch {
+            if ($oldImage) { docker run -d --name $env:CONTAINER_NAME --restart unless-stopped -p "${env:HOST_PORT}:8000" -v "${env:DATA_VOLUME}:/app/data" $oldImage }
+            throw
+          }
+          "oldImage=$oldImage" | Out-File -FilePath "$env:GITHUB_WORKSPACE\deploy-state.txt" -Encoding utf8
 
-      - name: Verify deployed service
+      - name: Verify web service and CRUD
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
+          $base = "http://127.0.0.1:${env:HOST_PORT}"
           $healthy = $false
           1..30 | ForEach-Object {
             if (-not $healthy) {
               try {
-                $response = Invoke-WebRequest -Uri "http://127.0.0.1:${env:HOST_PORT}/health" -UseBasicParsing -TimeoutSec 3
+                $response = Invoke-WebRequest -Uri "$base/health" -UseBasicParsing -TimeoutSec 3
                 if ($response.StatusCode -eq 200) { $healthy = $true }
               } catch { Start-Sleep -Seconds 2 }
             }
           }
-          if (-not $healthy) {
-            docker logs $env:CONTAINER_NAME
-            throw 'Deployed container did not pass the health check.'
-          }
-          Write-Host 'Deployed service is healthy.'
+          if (-not $healthy) { throw 'Deployed container did not pass /health.' }
+          $body = @{type='expense'; date=(Get-Date -Format 'yyyy-MM-dd'); amount=1; category='기타'; memo='CI smoke test'} | ConvertTo-Json
+          $created = Invoke-RestMethod -Uri "$base/api/transactions" -Method Post -ContentType 'application/json' -Body $body
+          $null = Invoke-RestMethod -Uri "$base/api/transactions/$($created.id)" -Method Put -ContentType 'application/json' -Body ($body.Replace('CI smoke test','CI smoke test updated'))
+          $listed = Invoke-RestMethod -Uri "$base/api/transactions" -Method Get
+          if (-not ($listed | Where-Object id -eq $created.id)) { throw 'CRUD read verification failed.' }
+          Invoke-RestMethod -Uri "$base/api/transactions/$($created.id)" -Method Delete | Out-Null
+          Write-Host 'Health check and transaction CRUD smoke test passed.'
 
+      - name: Roll back after failed deployment
+        if: failure()
+        shell: powershell
+        run: |
+          $state = "$env:GITHUB_WORKSPACE\deploy-state.txt"
+          if (Test-Path $state) {
+            $oldImage = (Get-Content $state | Select-String '^oldImage=').ToString().Substring(9)
+            if ($oldImage) {
+              docker rm -f $env:CONTAINER_NAME 2>$null
+              docker run -d --name $env:CONTAINER_NAME --restart unless-stopped -p "${env:HOST_PORT}:8000" -v "${env:DATA_VOLUME}:/app/data" $oldImage
+              Write-Host "Rolled back to $oldImage"
+            }
+          }
+          docker logs $env:CONTAINER_NAME 2>$null
