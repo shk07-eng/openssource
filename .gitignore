@@ -13,4 +13,8 @@ htmlcov/
 venv/
 tmp/
 temp/
+actions-runner/
+_work/
+runner.log
+runner-diagnostic-logs/
 

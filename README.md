@@ -61,5 +61,11 @@ Remove-Item .\data\expenses.db
 
 이미지 이름은 `${DOCKERHUB_USERNAME}/personal-expense-tracker`이며 `latest`와 커밋 SHA 태그가 생성됩니다. 저장소에 토큰을 직접 작성하거나 로그로 출력하지 마세요. 배포 시에는 `/app/data`를 영속 볼륨에 연결해야 SQLite 데이터가 유지됩니다.
 
+### Self-hosted Runner 자동 배포
+
+`.github/workflows/deploy-self-hosted.yml`은 `Build and Push Docker Image` workflow가 성공한 뒤 Windows Self-hosted Runner에서 자동 실행됩니다. Runner에는 Docker Desktop 또는 Docker Engine이 설치되어 있고, Runner 서비스 계정이 Docker CLI를 실행할 수 있어야 합니다. 기본 라벨(`self-hosted`, `Windows`, `X64`)을 사용합니다.
+
+배포 workflow는 Docker Hub 로그인, 성공한 CI 커밋 SHA 이미지 pull, 기존 `personal-expense-tracker` 컨테이너 교체, `personal-expense-tracker-data` 볼륨 연결, `http://127.0.0.1:8000/health` 확인을 수행합니다. Runner의 8000 포트가 사용 중이면 배포가 실패하므로 먼저 해당 포트를 비워야 합니다. Runner 설치 폴더와 실행 로그는 `.gitignore`에서 제외합니다.
+
 SQLite는 단일 인스턴스·소규모 사용에 적합합니다. 클라우드에서는 컨테이너 재생성 시 파일이 사라질 수 있으므로 영속 디스크를 연결하거나 PostgreSQL 등 관리형 DB로 이전해야 합니다. `.env`, DB 파일, 인증정보를 저장소나 로그에 남기지 마세요. Chart.js CDN을 사용할 수 없는 폐쇄망에서는 라이브러리를 별도 정적 자산으로 제공해야 합니다.
 
