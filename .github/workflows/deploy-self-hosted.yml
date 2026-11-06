@@ -25,13 +25,13 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Pull image published by CI
-        shell: powershell
+        shell: powershell -ExecutionPolicy Bypass -File "{0}"
         env:
           IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.event.workflow_run.head_sha }}
         run: docker pull $env:IMAGE
 
       - name: Replace container with rollback protection
-        shell: powershell
+        shell: powershell -ExecutionPolicy Bypass -File "{0}"
         env:
           IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}:${{ github.event.workflow_run.head_sha }}
         run: |
@@ -54,7 +54,7 @@ jobs:
           "oldImage=$oldImage" | Out-File -FilePath "$env:GITHUB_WORKSPACE\deploy-state.txt" -Encoding utf8
 
       - name: Verify web service and CRUD
-        shell: powershell
+        shell: powershell -ExecutionPolicy Bypass -File "{0}"
         run: |
           $ErrorActionPreference = 'Stop'
           $base = "http://127.0.0.1:${env:HOST_PORT}"
@@ -78,7 +78,7 @@ jobs:
 
       - name: Roll back after failed deployment
         if: failure()
-        shell: powershell
+        shell: powershell -ExecutionPolicy Bypass -File "{0}"
         run: |
           $state = "$env:GITHUB_WORKSPACE\deploy-state.txt"
           if (Test-Path $state) {
