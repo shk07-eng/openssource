@@ -13,6 +13,12 @@ DB = Path(os.getenv("DATABASE_PATH", str(ROOT / "data" / "expenses.db")))
 DB.parent.mkdir(parents=True, exist_ok=True)
 app = FastAPI(title=os.getenv("APP_NAME", "나의 가계부"))
 
+@app.get("/health")
+def health():
+    with closing(conn()) as c:
+        c.execute("SELECT 1").fetchone()
+    return {"status": "ok", "database": "ok"}
+
 def conn():
     c = sqlite3.connect(DB); c.row_factory = sqlite3.Row
     c.execute("""CREATE TABLE IF NOT EXISTS transactions(

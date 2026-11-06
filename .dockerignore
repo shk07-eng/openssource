@@ -1,0 +1,12 @@
+.git
+.github
+.env
+data
+*.db
+*.sqlite
+*.sqlite3
+__pycache__
+*.py[cod]
+*.log
+.pytest_cache
+README.md
