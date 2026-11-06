@@ -11,7 +11,16 @@ from pydantic import BaseModel, Field, field_validator
 ROOT = Path(__file__).resolve().parent.parent
 DB = Path(os.getenv("DATABASE_PATH", str(ROOT / "data" / "expenses.db")))
 DB.parent.mkdir(parents=True, exist_ok=True)
-app = FastAPI(title=os.getenv("APP_NAME", "나의 가계부"))
+APP_VERSION = os.getenv("APP_VERSION", "1.0")
+app = FastAPI(title=os.getenv("APP_NAME", "나의 가계부"), version=APP_VERSION)
+
+@app.get("/api/version")
+def version():
+    return {"version": APP_VERSION, "service": "personal-expense-tracker"}
+
+@app.get("/api/health")
+def api_health():
+    return health()
 
 @app.get("/health")
 def health():
@@ -24,6 +33,7 @@ def conn():
     c.execute("""CREATE TABLE IF NOT EXISTS transactions(
       id INTEGER PRIMARY KEY AUTOINCREMENT, type TEXT NOT NULL CHECK(type IN ('income','expense')),
       date TEXT NOT NULL, amount INTEGER NOT NULL CHECK(amount > 0), category TEXT NOT NULL, memo TEXT DEFAULT '')""")
+    c.execute("CREATE TABLE IF NOT EXISTS budgets(month TEXT PRIMARY KEY, amount INTEGER NOT NULL CHECK(amount >= 0))")
     c.commit(); return c
 
 class TransactionIn(BaseModel):
@@ -80,7 +90,30 @@ def summary():
         months=c.execute("SELECT substr(date,1,7) month,type,SUM(amount) amount FROM transactions GROUP BY month,type ORDER BY month").fetchall()
     def vals(rs): return {r['type']:r['n'] for r in rs}
     t=vals(total); m=vals(this)
-    return {"total_income":t.get('income',0),"total_expense":t.get('expense',0),"balance":t.get('income',0)-t.get('expense',0),"month_income":m.get('income',0),"month_expense":m.get('expense',0),"categories":[dict(x) for x in cats],"months":[dict(x) for x in months]}
+    result={"total_income":t.get('income',0),"total_expense":t.get('expense',0),"balance":t.get('income',0)-t.get('expense',0),"month_income":m.get('income',0),"month_expense":m.get('expense',0),"categories":[dict(x) for x in cats],"months":[dict(x) for x in months],"version":APP_VERSION}
+    if APP_VERSION >= "2.0": result.update(budget(month))
+    return result
+
+@app.get("/api/budget")
+def budget(month: str|None=None):
+    month=month or date.today().isoformat()[:7]
+    if APP_VERSION < "2.0": raise HTTPException(404, "예산 기능은 Version 2.0에서 제공됩니다.")
+    with closing(conn()) as c:
+        row_budget=c.execute("SELECT amount FROM budgets WHERE month=?",(month,)).fetchone()
+        spent=c.execute("SELECT COALESCE(SUM(amount),0) amount FROM transactions WHERE type='expense' AND substr(date,1,7)=?",(month,)).fetchone()["amount"]
+    amount=row_budget["amount"] if row_budget else 0
+    return {"month":month,"budget":amount,"spent":spent,"remaining":amount-spent,"usage_percent":round(spent/amount*100,2) if amount else 0,"version":APP_VERSION}
+
+class BudgetIn(BaseModel):
+    month: str = Field(pattern=r"^\d{4}-\d{2}$")
+    amount: int = Field(ge=0)
+
+@app.put("/api/budget")
+def set_budget(item: BudgetIn):
+    if APP_VERSION < "2.0": raise HTTPException(404, "예산 기능은 Version 2.0에서 제공됩니다.")
+    with closing(conn()) as c:
+        c.execute("INSERT INTO budgets(month,amount) VALUES(?,?) ON CONFLICT(month) DO UPDATE SET amount=excluded.amount",(item.month,item.amount)); c.commit()
+    return budget(item.month)
 
 app.mount("/static", StaticFiles(directory=ROOT/"static"), name="static")
 @app.get("/")
